@@ -8,3 +8,5 @@
 > Commits you push to the connected branch sync back to Lovable and show up in
 > the editor, so keep the branch in a working state.
 <!-- LOVABLE:END -->
+
+- All bill maths and flagging lives in src/lib/bill-math.ts (tested); AI only extracts lines and writes prose, and AI messages containing numbers not computed by code fall back to a code template — keeps numbers trustworthy.
