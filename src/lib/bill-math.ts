@@ -52,7 +52,8 @@ export function checkBill(extracted: ExtractedLine[], promise: string): BillChec
   const gst = round2(sumOfCharges * GST_RATE);
   const computedTotal = round2(sumOfCharges + gst);
   const billTax = taxLines.length ? round2(taxLines.reduce((s, l) => s + l.amount, 0)) : null;
-  const billTotal = totalLines.length ? round2(totalLines[totalLines.length - 1].amount) : null;
+  const lastTotal = totalLines[totalLines.length - 1];
+  const billTotal = lastTotal ? round2(lastTotal.amount) : null;
   const expectedTotal = promisedPrice !== null ? round2(promisedPrice * (1 + GST_RATE)) : null;
   const finalTotal = billTotal ?? computedTotal;
   const difference = expectedTotal !== null ? round2(finalTotal - expectedTotal) : null;
