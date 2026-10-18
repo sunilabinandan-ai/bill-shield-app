@@ -3,14 +3,19 @@
 export const GST_RATE = 0.18;
 const TOLERANCE = 1; // ₹1 rounding tolerance
 
-export type LineKind = "charge" | "tax" | "total";
-export type ExtractedLine = { label: string; amount: number; kind: LineKind };
+export type ChargeLine = { label: string; amount: number; isPlan: boolean };
+export type TaxLine = { label: string; amount: number };
+export type Extracted = { charges: ChargeLine[]; taxes: TaxLine[]; statedTotal: number | null };
+
 export type Flag = "OK" | "Unexplained" | "Wrong";
-export type CheckedLine = ExtractedLine & { flag: Flag; reason: string };
+export type LineKind = "charge" | "tax" | "total";
+export type CheckedLine = { label: string; amount: number; kind: LineKind; flag: Flag; reason: string };
 
 export type BillCheck = {
   lines: CheckedLine[];
   promisedPrice: number | null;
+  planAmount: number | null;
+  planDifference: number | null;
   sumOfCharges: number;
   gst: number;
   computedTotal: number;
@@ -19,9 +24,13 @@ export type BillCheck = {
   expectedTotal: number | null;
   difference: number | null;
   unexplainedTotal: number;
+  totalMismatch: boolean;
+  warning: string | null;
 };
 
 export const round2 = (n: number) => Math.round(n * 100) / 100;
+const isZero = (n: number) => Math.abs(n) < 0.005;
+const money = (n: number) => `₹${n.toFixed(2)}`;
 
 /** Pull the promised plan price (first rupee amount) out of the user's text. */
 export function parsePromisedPrice(promise: string): number | null {
@@ -31,63 +40,104 @@ export function parsePromisedPrice(promise: string): number | null {
 }
 
 const PLAN_WORDS = ["plan", "rental", "monthly", "subscription", "tariff"];
+const looksLikePlan = (c: ChargeLine) => c.isPlan || PLAN_WORDS.some((w) => c.label.toLowerCase().includes(w));
 
-function isCoveredByPromise(line: ExtractedLine, promise: string, price: number | null): boolean {
-  if (price !== null && Math.abs(line.amount - price) <= TOLERANCE) return true;
-  const label = line.label.toLowerCase();
-  if (PLAN_WORDS.some((w) => label.includes(w))) return true;
-  // label words the user explicitly mentioned (ignoring short words and "off" items)
-  const promiseLower = promise.toLowerCase();
-  const words = label.split(/[^a-z]+/).filter((w) => w.length > 3);
-  return words.some((w) => promiseLower.includes(w) && !new RegExp(`${w}\\s+(off|disabled|no)`).test(promiseLower));
+function mentionedInPromise(label: string, promise: string): boolean {
+  const p = promise.toLowerCase();
+  const words = label.toLowerCase().split(/[^a-z]+/).filter((w) => w.length > 3);
+  return words.some((w) => p.includes(w) && !new RegExp(`${w}\\s+(off|disabled|no)`).test(p));
 }
 
-export function checkBill(extracted: ExtractedLine[], promise: string): BillCheck {
+export function checkBill(extracted: Extracted, promise: string): BillCheck {
   const promisedPrice = parsePromisedPrice(promise);
-  const charges = extracted.filter((l) => l.kind === "charge");
-  const taxLines = extracted.filter((l) => l.kind === "tax");
-  const totalLines = extracted.filter((l) => l.kind === "total");
+  const charges = extracted.charges.filter((c) => Number.isFinite(c.amount) && !isZero(c.amount));
+  const taxes = extracted.taxes.filter((t) => Number.isFinite(t.amount) && !isZero(t.amount));
 
   const sumOfCharges = round2(charges.reduce((s, l) => s + l.amount, 0));
   const gst = round2(sumOfCharges * GST_RATE);
   const computedTotal = round2(sumOfCharges + gst);
-  const billTax = taxLines.length ? round2(taxLines.reduce((s, l) => s + l.amount, 0)) : null;
-  const lastTotal = totalLines[totalLines.length - 1];
-  const billTotal = lastTotal ? round2(lastTotal.amount) : null;
+  const billTax = taxes.length ? round2(taxes.reduce((s, l) => s + l.amount, 0)) : null;
+  const billTotal =
+    extracted.statedTotal !== null && Number.isFinite(extracted.statedTotal) && !isZero(extracted.statedTotal)
+      ? round2(extracted.statedTotal)
+      : null;
   const expectedTotal = promisedPrice !== null ? round2(promisedPrice * (1 + GST_RATE)) : null;
-  const finalTotal = billTotal ?? computedTotal;
-  const difference = expectedTotal !== null ? round2(finalTotal - expectedTotal) : null;
+  const difference = expectedTotal !== null ? round2((billTotal ?? computedTotal) - expectedTotal) : null;
 
-  const taxWrong = billTax !== null && Math.abs(billTax - gst) > TOLERANCE;
-  const totalWrong = billTotal !== null && Math.abs(billTotal - round2(sumOfCharges + (billTax ?? gst))) > TOLERANCE;
+  const taxMatches = billTax === null || Math.abs(billTax - gst) <= TOLERANCE;
+  const totalMismatch = billTotal !== null && Math.abs(billTotal - computedTotal) > TOLERANCE;
+  // Bill's own lines + its own tax add up to its total, but the tax isn't 18% → genuine tax error.
+  const billInternallyConsistent =
+    billTotal !== null && billTax !== null && Math.abs(billTotal - (sumOfCharges + billTax)) <= TOLERANCE;
+  const taxWrong = !taxMatches && billInternallyConsistent;
+  const warning = totalMismatch && !taxWrong ? "Lines may be missing or counted twice" : null;
 
-  const lines: CheckedLine[] = extracted.map((l) => {
-    if (l.kind === "tax")
-      return taxWrong
-        ? { ...l, flag: "Wrong", reason: `Tax should be ₹${gst.toFixed(2)} (18% of ₹${sumOfCharges.toFixed(2)})` }
-        : { ...l, flag: "OK", reason: "Matches 18% GST" };
-    if (l.kind === "total")
-      return totalWrong
-        ? { ...l, flag: "Wrong", reason: "Lines and tax don't add up to this total" }
-        : { ...l, flag: "OK", reason: "Adds up" };
-    return isCoveredByPromise(l, promise, promisedPrice)
-      ? { ...l, flag: "OK", reason: "Covered by your plan" }
-      : { ...l, flag: "Unexplained", reason: "Not covered by what you were promised" };
+  let planAmount: number | null = null;
+  let planDifference: number | null = null;
+  let planSeen = false;
+
+  const lines: CheckedLine[] = charges.map((c) => {
+    const base = { label: c.label, amount: c.amount, kind: "charge" as const };
+    if (!planSeen && looksLikePlan(c)) {
+      planSeen = true;
+      planAmount = c.amount;
+      if (promisedPrice === null) return { ...base, flag: "OK", reason: "Plan charge" };
+      const diff = round2(c.amount - promisedPrice);
+      planDifference = diff;
+      return isZero(diff)
+        ? { ...base, flag: "OK", reason: "Matches promised price" }
+        : { ...base, flag: "Unexplained", reason: `${money(Math.abs(diff))} ${diff > 0 ? "more" : "less"} than promised ${money(promisedPrice)}` };
+    }
+    if (promisedPrice !== null && Math.abs(c.amount - promisedPrice) < 0.005)
+      return { ...base, flag: "OK", reason: "Matches promised price" };
+    return mentionedInPromise(c.label, promise)
+      ? { ...base, flag: "OK", reason: "Covered by your promise" }
+      : { ...base, flag: "Unexplained", reason: "Not covered by what you were promised" };
   });
 
+  for (const t of taxes) {
+    lines.push({
+      label: t.label, amount: t.amount, kind: "tax",
+      ...(taxWrong
+        ? { flag: "Wrong" as const, reason: `Tax should be ${money(gst)} (18% of ${money(sumOfCharges)})` }
+        : taxMatches
+          ? { flag: "OK" as const, reason: "Matches 18% GST" }
+          : { flag: "Unexplained" as const, reason: "Doesn't match 18% GST — see warning" }),
+    });
+  }
+  if (billTotal !== null) {
+    lines.push({
+      label: "Total on bill", amount: billTotal, kind: "total",
+      ...(totalMismatch
+        ? { flag: "Unexplained" as const, reason: `Code's total is ${money(computedTotal)}` }
+        : { flag: "OK" as const, reason: "Adds up" }),
+    });
+  }
+
+  // Extra amount for unexplained charges: full charge, or only the excess over the promised plan price.
   const unexplainedTotal = round2(
-    lines.filter((l) => l.flag === "Unexplained").reduce((s, l) => s + l.amount, 0),
+    lines
+      .filter((l) => l.kind === "charge" && l.flag === "Unexplained")
+      .reduce((s, l) => s + (l.amount === planAmount && planDifference !== null ? planDifference : l.amount), 0),
   );
 
-  return { lines, promisedPrice, sumOfCharges, gst, computedTotal, billTax, billTotal, expectedTotal, difference, unexplainedTotal };
+  return {
+    lines, promisedPrice, planAmount, planDifference, sumOfCharges, gst, computedTotal,
+    billTax, billTotal, expectedTotal, difference, unexplainedTotal, totalMismatch, warning,
+  };
+}
+
+/** Lines the complaint should mention: non-zero Unexplained/Wrong. */
+export function complaintLines(c: BillCheck): CheckedLine[] {
+  return c.lines.filter((l) => l.flag !== "OK" && !isZero(l.amount));
 }
 
 /** Every number the complaint message is allowed to contain. */
 export function allowedNumbers(c: BillCheck): Set<string> {
   const nums = [
-    c.promisedPrice, c.sumOfCharges, c.gst, c.computedTotal, c.billTax, c.billTotal,
-    c.expectedTotal, c.difference, c.difference !== null ? Math.abs(c.difference) : null,
-    c.unexplainedTotal, 18, ...c.lines.map((l) => l.amount),
+    c.promisedPrice, c.planAmount, c.planDifference, c.planDifference !== null ? Math.abs(c.planDifference) : null,
+    c.sumOfCharges, c.gst, c.computedTotal, c.billTax, c.billTotal, c.expectedTotal, c.difference,
+    c.difference !== null ? Math.abs(c.difference) : null, c.unexplainedTotal, 18, ...c.lines.map((l) => l.amount),
   ].filter((n): n is number => n !== null);
   const set = new Set<string>();
   for (const n of nums) {
@@ -104,14 +154,21 @@ export function foreignNumbers(message: string, c: BillCheck): string[] {
   return found.filter((n) => !allowed.has(n) && !allowed.has(String(Number(n))));
 }
 
+export const SIGN_OFF = "[Your name]";
+
+export function ensureSignOff(message: string): string {
+  const t = message.trim();
+  return t.endsWith(SIGN_OFF) ? t : `${t}\n\n${SIGN_OFF}`;
+}
+
 export function templateMessage(c: BillCheck, promise: string): string {
-  const flagged = c.lines.filter((l) => l.flag !== "OK");
-  const list = flagged.map((l) => `- ${l.label}: ₹${l.amount.toFixed(2)} (${l.flag})`).join("\n");
+  const flagged = complaintLines(c);
+  const list = flagged.map((l) => `- ${l.label}: ${money(l.amount)} (${l.flag}: ${l.reason})`).join("\n");
   return `Dear Customer Care,
 
 I was promised: "${promise}". My bill does not match this.
 
-${flagged.length ? `The following charges are unexplained or incorrect:\n${list}\n\n` : ""}Sum of charges: ₹${c.sumOfCharges.toFixed(2)}. GST at 18%: ₹${c.gst.toFixed(2)}. ${c.billTotal !== null ? `Billed total: ₹${c.billTotal.toFixed(2)}.` : `Calculated total: ₹${c.computedTotal.toFixed(2)}.`}${c.difference !== null ? ` This is ₹${Math.abs(c.difference).toFixed(2)} ${c.difference >= 0 ? "more" : "less"} than the expected ₹${c.expectedTotal!.toFixed(2)}.` : ""}
+${flagged.length ? `Please explain the following charges:\n${list}\n\n` : ""}Sum of charges: ${money(c.sumOfCharges)}. GST at 18%: ${money(c.gst)}. ${c.billTotal !== null ? `Billed total: ${money(c.billTotal)}.` : `Calculated total: ${money(c.computedTotal)}.`}${c.difference !== null ? ` This is ${money(Math.abs(c.difference))} ${c.difference >= 0 ? "more" : "less"} than the expected ${money(c.expectedTotal!)}.` : ""}
 
 Please provide:
 - What each of these charges is for.
@@ -119,5 +176,6 @@ Please provide:
 - Confirmation of my current account settings (e.g. whether roaming and value-added services are off).
 - A reversal of any charge applied in error.
 
-Thank you.`;
+Thank you,
+${SIGN_OFF}`;
 }

@@ -48,9 +48,9 @@ function Index() {
     try {
       setStatus("Reading your bill…");
       const base64 = await toBase64(file);
-      const { lines } = await extract({ data: { fileName: file.name, mimeType: file.type, base64 } });
-      if (!lines.length) throw new Error("No lines found on the bill.");
-      const c = checkBill(lines, promise);
+      const extracted = await extract({ data: { fileName: file.name, mimeType: file.type, base64 } });
+      if (!extracted.charges.length) throw new Error("No charges found on the bill.");
+      const c = checkBill(extracted, promise);
       setCheck(c);
       setStatus("Drafting your message…");
       const d = await draft({ data: { promise, check: c } });
@@ -102,6 +102,11 @@ function Index() {
 
       {check && (
         <>
+          {check.warning && (
+            <div className="mt-8 rounded-xl border border-warn-foreground/30 bg-warn px-5 py-4 text-sm text-warn-foreground">
+              <strong>Warning:</strong> {check.warning}. Code's total is {inr(check.computedTotal)} but the bill says {inr(check.billTotal ?? 0)}.
+            </div>
+          )}
           <section className="mt-8 overflow-hidden rounded-xl border bg-card shadow-soft">
             <table className="w-full text-sm">
               <thead className="bg-muted text-left text-muted-foreground">
@@ -114,7 +119,10 @@ function Index() {
               <tbody>
                 {check.lines.map((l, i) => (
                   <tr key={i} className="border-t">
-                    <td className="px-4 py-3">{l.label}</td>
+                    <td className="px-4 py-3">
+                      {l.label}
+                      {l.flag !== "OK" && <div className="text-xs text-muted-foreground">{l.reason}</div>}
+                    </td>
                     <td className="px-4 py-3 text-right tabular-nums">{inr(l.amount)}</td>
                     <td className="px-4 py-3">
                       <span
@@ -139,6 +147,8 @@ function Index() {
               <dt className="text-muted-foreground">GST (18%)</dt><dd className="text-right">{inr(check.gst)}</dd>
               <dt className="text-muted-foreground">Calculated total</dt><dd className="text-right">{inr(check.computedTotal)}</dd>
               {check.billTotal !== null && (<><dt className="text-muted-foreground">Total on bill</dt><dd className="text-right">{inr(check.billTotal)}</dd></>)}
+              {check.planDifference !== null && check.planDifference !== 0 && (<><dt className="text-muted-foreground">Plan line vs promised</dt><dd className="text-right text-destructive">{check.planDifference > 0 ? "+" : ""}{inr(check.planDifference)}</dd></>)}
+              {check.billTax !== null && (<><dt className="text-muted-foreground">Tax on bill</dt><dd className="text-right">{inr(check.billTax)}</dd></>)}
               {check.expectedTotal !== null && (<><dt className="text-muted-foreground">Promised {inr(check.promisedPrice!)} + GST</dt><dd className="text-right">{inr(check.expectedTotal)}</dd></>)}
               {check.difference !== null && (
                 <>
