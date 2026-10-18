@@ -18,7 +18,7 @@ export const Route = createFileRoute("/")({
   component: Index,
 });
 
-const inr = (n: number) => `₹${n.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+const inr = (n: number | null | undefined) => `₹${(n ?? 0).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
 function toBase64(file: File): Promise<string> {
   return new Promise((res, rej) => {
@@ -146,11 +146,11 @@ function Index() {
               <dt className="text-muted-foreground">Sum of charges</dt><dd className="text-right">{inr(check.sumOfCharges)}</dd>
               <dt className="text-muted-foreground">GST (18%)</dt><dd className="text-right">{inr(check.gst)}</dd>
               <dt className="text-muted-foreground">Calculated total</dt><dd className="text-right">{inr(check.computedTotal)}</dd>
-              {check.billTotal !== null && (<><dt className="text-muted-foreground">Total on bill</dt><dd className="text-right">{inr(check.billTotal)}</dd></>)}
-              {check.planDifference !== null && check.planDifference !== 0 && (<><dt className="text-muted-foreground">Plan line vs promised</dt><dd className="text-right text-destructive">{check.planDifference > 0 ? "+" : ""}{inr(check.planDifference)}</dd></>)}
-              {check.billTax !== null && (<><dt className="text-muted-foreground">Tax on bill</dt><dd className="text-right">{inr(check.billTax)}</dd></>)}
-              {check.expectedTotal !== null && (<><dt className="text-muted-foreground">Promised {inr(check.promisedPrice!)} + GST</dt><dd className="text-right">{inr(check.expectedTotal)}</dd></>)}
-              {check.difference !== null && (
+              {check.billTotal != null && (<><dt className="text-muted-foreground">Total on bill</dt><dd className="text-right">{inr(check.billTotal)}</dd></>)}
+              {check.planDifference != null && check.planDifference !== 0 && (<><dt className="text-muted-foreground">Plan line vs promised</dt><dd className="text-right text-destructive">{check.planDifference > 0 ? "+" : ""}{inr(check.planDifference)}</dd></>)}
+              {check.billTax != null && (<><dt className="text-muted-foreground">Tax on bill</dt><dd className="text-right">{inr(check.billTax)}</dd></>)}
+              {check.expectedTotal != null && (<><dt className="text-muted-foreground">Promised {inr(check.promisedPrice!)} + GST</dt><dd className="text-right">{inr(check.expectedTotal)}</dd></>)}
+              {check.difference != null && (
                 <>
                   <dt className="border-t pt-2 font-medium">Difference from promise</dt>
                   <dd className={`border-t pt-2 text-right font-semibold ${check.difference > 1 ? "text-destructive" : "text-ok-strong"}`}>
@@ -159,7 +159,7 @@ function Index() {
                 </>
               )}
             </dl>
-            {check.promisedPrice === null && <p className="mt-3 text-xs text-muted-foreground">Add a price (e.g. ₹749) to your promise to see the difference.</p>}
+            {check.promisedPrice == null && <p className="mt-3 text-xs text-muted-foreground">Add a price (e.g. ₹749) to your promise to see the difference.</p>}
           </section>
 
           {message && (
