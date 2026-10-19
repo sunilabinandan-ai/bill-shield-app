@@ -1,5 +1,11 @@
 const LOVABLE_MODEL = "openai/gpt-6-astra";
-const ANTHROPIC_MODEL = process.env["ANTHROPIC_MODEL"] || "claude-sonnet-5-5";
+const ANTHROPIC_MODELS = [
+  process.env["ANTHROPIC_MODEL"],
+  "claude-sonnet-5-5",
+  "claude-sonnet-4-5",
+  "claude-sonnet-4-0",
+  "claude-3-7-sonnet-latest",
+].filter((m): m is string => !!m);
 
 type Part = { type: string; text?: string; image_url?: string; file_data?: string; [k: string]: unknown };
 type Msg = { role: string; content: Part[] | string };
@@ -63,28 +69,42 @@ async function callAnthropic(body: Record<string, unknown>): Promise<string> {
       `Respond with ONLY a single JSON object (no prose, no code fences) that matches this JSON schema exactly:\n${JSON.stringify(format?.schema)}`;
   }
 
-  const res = await fetch("https://api.anthropic.com/v1/messages", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "x-api-key": key,
-      "anthropic-version": "2023-06-01",
-    },
-    body: JSON.stringify({
-      model: ANTHROPIC_MODEL,
-      max_tokens: 4000,
-      temperature: 0,
-      ...(system ? { system } : {}),
-      messages,
-    }),
-  });
-  if (!res.ok) {
-    const t = await res.text().catch(() => "");
-    console.error("Anthropic error", res.status, t);
-    if (res.status === 429) throw new Error("Too many requests, please try again shortly.");
-    if (res.status === 401) throw new Error("The AI key is not valid.");
-    if (res.status === 402 || /credit balance/i.test(t)) throw new Error("AI credits have run out.");
-    throw new Error("The AI service could not process this request.");
+  let res: Response | null = null;
+  let lastErr = "";
+  for (const model of ANTHROPIC_MODELS) {
+    res = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-api-key": key,
+        "anthropic-version": "2023-06-01",
+      },
+      body: JSON.stringify({
+        model,
+        max_tokens: 4000,
+        temperature: 0,
+        ...(system ? { system } : {}),
+        messages,
+      }),
+    });
+    if (res.ok) break;
+    lastErr = await res.text().catch(() => "");
+    console.error("Anthropic error", model, res.status, lastErr);
+    const modelProblem = res.status === 404 || (res.status === 400 && /model/i.test(lastErr));
+    if (!modelProblem) break;
+  }
+  if (!res || !res.ok) {
+    const status = res?.status ?? 0;
+    let detail = "";
+    try {
+      detail = (JSON.parse(lastErr) as { error?: { message?: string } }).error?.message ?? "";
+    } catch {
+      detail = lastErr.slice(0, 200);
+    }
+    if (status === 429) throw new Error("Too many requests, please try again shortly.");
+    if (status === 401) throw new Error("The AI key is not valid.");
+    if (/credit balance/i.test(detail)) throw new Error("Your Anthropic account is out of credit. Add credit at console.anthropic.com.");
+    throw new Error(`AI error ${status}: ${detail || "unknown"}`);
   }
   const json = (await res.json()) as { content?: { type: string; text?: string }[] };
   const text = (json.content ?? [])
