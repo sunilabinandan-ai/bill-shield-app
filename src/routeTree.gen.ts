@@ -13,6 +13,8 @@ import { Route as IndexRouteImport } from './routes/index'
 import { Route as AuthenticatedRouteRouteImport } from './routes/_authenticated/route'
 import { Route as AuthRouteImport } from './routes/auth'
 import { Route as AuthenticatedCheckRouteImport } from './routes/_authenticated/check'
+import { Route as AuthenticatedMyBillsRouteImport } from './routes/_authenticated/my-bills'
+import { Route as AuthenticatedBillsBillIdRouteImport } from './routes/_authenticated/bills.$billId'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -33,16 +35,31 @@ const AuthenticatedCheckRoute = AuthenticatedCheckRouteImport.update({
   path: '/check',
   getParentRoute: () => AuthenticatedRouteRoute,
 } as any)
+const AuthenticatedMyBillsRoute = AuthenticatedMyBillsRouteImport.update({
+  id: '/my-bills',
+  path: '/my-bills',
+  getParentRoute: () => AuthenticatedRouteRoute,
+} as any)
+const AuthenticatedBillsBillIdRoute =
+  AuthenticatedBillsBillIdRouteImport.update({
+    id: '/bills/$billId',
+    path: '/bills/$billId',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/auth': typeof AuthRoute
   '/check': typeof AuthenticatedCheckRoute
+  '/my-bills': typeof AuthenticatedMyBillsRoute
+  '/bills/$billId': typeof AuthenticatedBillsBillIdRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/auth': typeof AuthRoute
   '/check': typeof AuthenticatedCheckRoute
+  '/my-bills': typeof AuthenticatedMyBillsRoute
+  '/bills/$billId': typeof AuthenticatedBillsBillIdRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -50,13 +67,22 @@ export interface FileRoutesById {
   '/_authenticated': typeof AuthenticatedRouteRouteWithChildren
   '/auth': typeof AuthRoute
   '/_authenticated/check': typeof AuthenticatedCheckRoute
+  '/_authenticated/my-bills': typeof AuthenticatedMyBillsRoute
+  '/_authenticated/bills/$billId': typeof AuthenticatedBillsBillIdRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/auth' | '/check'
+  fullPaths: '/' | '/auth' | '/check' | '/my-bills' | '/bills/$billId'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/auth' | '/check'
-  id: '__root__' | '/' | '/_authenticated' | '/auth' | '/_authenticated/check'
+  to: '/' | '/auth' | '/check' | '/my-bills' | '/bills/$billId'
+  id:
+    | '__root__'
+    | '/'
+    | '/_authenticated'
+    | '/auth'
+    | '/_authenticated/check'
+    | '/_authenticated/my-bills'
+    | '/_authenticated/bills/$billId'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -95,15 +121,33 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedCheckRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
+    '/_authenticated/my-bills': {
+      id: '/_authenticated/my-bills'
+      path: '/my-bills'
+      fullPath: '/my-bills'
+      preLoaderRoute: typeof AuthenticatedMyBillsRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
+    '/_authenticated/bills/$billId': {
+      id: '/_authenticated/bills/$billId'
+      path: '/bills/$billId'
+      fullPath: '/bills/$billId'
+      preLoaderRoute: typeof AuthenticatedBillsBillIdRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
   }
 }
 
 interface AuthenticatedRouteRouteChildren {
   AuthenticatedCheckRoute: typeof AuthenticatedCheckRoute
+  AuthenticatedMyBillsRoute: typeof AuthenticatedMyBillsRoute
+  AuthenticatedBillsBillIdRoute: typeof AuthenticatedBillsBillIdRoute
 }
 
 const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
   AuthenticatedCheckRoute: AuthenticatedCheckRoute,
+  AuthenticatedMyBillsRoute: AuthenticatedMyBillsRoute,
+  AuthenticatedBillsBillIdRoute: AuthenticatedBillsBillIdRoute,
 }
 
 const AuthenticatedRouteRouteWithChildren =
