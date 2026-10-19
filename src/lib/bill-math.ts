@@ -257,7 +257,6 @@ ${flagged.length ? `I would like to query the following transaction${flagged.len
 - The full merchant name and contact details, and the date and time of the transaction.
 - A copy of the receipt or transaction record.
 - Confirmation of whether this was authorised on my card.
-- A credit for any charge applied in error.
 
 Thank you,
 ${SIGN_OFF}`;

@@ -66,6 +66,7 @@ describe("US card statement (classmate test)", () => {
     const m = templateMessage(c, "");
     expect(m).toContain("CLAYTON MO: $78.00\n");
     expect(m).not.toContain("You asked");
+    expect(m).not.toMatch(/credit|refund|revers/i);
     expect(m).not.toContain("GST");
     expect(m).not.toContain("₹");
     expect(foreignNumbers(m, c)).toEqual([]);
