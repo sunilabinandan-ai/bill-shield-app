@@ -1,10 +1,16 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
 import { useState } from "react";
+import { Button } from "@/components/ui/button";
+import { SavedMessage } from "@/components/saved-message";
+import { supabase } from "@/integrations/supabase/client";
+import { saveBill } from "@/lib/saved-bills.functions";
+import { privateText } from "@/lib/saving-rules";
+import { useQueryClient } from "@tanstack/react-query";
 import { checkBill, type BillCheck } from "@/lib/bill-math";
 import { draftComplaint, extractBill } from "@/lib/bill.functions";
 
-export const Route = createFileRoute("/")({
+export const Route = createFileRoute("/_authenticated/check")({
   head: () => ({
     meta: [
       { title: "BillShield — Check your phone or utility bill" },
@@ -38,10 +44,18 @@ function Index() {
   const [error, setError] = useState<string | null>(null);
   const [check, setCheck] = useState<BillCheck | null>(null);
   const [message, setMessage] = useState("");
-  const [copied, setCopied] = useState(false);
+  const save = useServerFn(saveBill);
+  const cache = useQueryClient();
+  const [provider, setProvider] = useState("");
+  const [billPeriod, setBillPeriod] = useState("");
+  const [redacted, setRedacted] = useState(false);
+  const [saved, setSaved] = useState<{ billId: string; messageId: string } | null>(null);
 
   async function run() {
-    if (!file || !promise.trim()) return;
+    if (!file || !promise.trim() || !provider.trim() || !redacted) return;
+    if (file.size > 10 * 1024 * 1024) { setError("Choose a bill smaller than 10 MB."); return; }
+    if (privateText(promise) !== promise || privateText(provider) !== provider || privateText(billPeriod) !== billPeriod) { setError("Remove phone numbers, account numbers and addresses from these fields."); return; }
+    setSaved(null);
     setError(null);
     setCheck(null);
     setMessage("");
@@ -54,7 +68,18 @@ function Index() {
       setCheck(c);
       setStatus("Drafting your message…");
       const d = await draft({ data: { promise, check: c } });
-      setMessage(d.message);
+      setStatus("Saving your bill…");
+      const { data: userData } = await supabase.auth.getUser();
+      if (!userData.user) throw new Error("Please sign in again.");
+      const ext = file.type === "application/pdf" ? "pdf" : file.type === "image/png" ? "png" : "jpg";
+      const filePath = `${userData.user.id}/${crypto.randomUUID()}.${ext}`;
+      const { error: uploadError } = await supabase.storage.from("bills-private").upload(filePath, file);
+      if (uploadError) throw new Error("Could not save the bill file.");
+      try {
+        const record = await save({ data: { provider: provider.trim(), billPeriod, filePath, promise, message: d.message, extracted } });
+        setSaved(record); setMessage(privateText(d.message));
+        await cache.invalidateQueries({ queryKey: ["bills"] });
+      } catch (error) { await supabase.storage.from("bills-private").remove([filePath]); throw error; }
     } catch (e) {
       setError(e instanceof Error ? e.message : "Something went wrong.");
     } finally {
@@ -65,13 +90,15 @@ function Index() {
   return (
     <main className="mx-auto max-w-3xl px-5 py-12">
       <header className="mb-10">
-        <h1 className="font-display text-4xl font-semibold tracking-tight">
+        <h1 className="font-display text-4xl font-semibold ">
           Bill<span className="text-primary">Shield</span>
         </h1>
         <p className="mt-2 text-muted-foreground">Upload a bill, tell us what you were promised, and see what doesn't add up.</p>
       </header>
 
       <section className="space-y-5 rounded-xl border bg-card p-6 shadow-soft">
+        <label className="block text-sm">Provider<input required value={provider} onChange={e => setProvider(e.target.value)} placeholder="Vi" className="mt-2 w-full rounded-md border bg-background px-4 py-3" /></label>
+        <label className="block text-sm">Bill period (optional)<input value={billPeriod} onChange={e => setBillPeriod(e.target.value)} placeholder="October 2026" className="mt-2 w-full rounded-md border bg-background px-4 py-3" /></label>
         <label className="block">
           <span className="text-sm font-medium">1. Your bill (image or PDF)</span>
           <input
@@ -90,13 +117,14 @@ function Index() {
             className="mt-2 w-full rounded-lg border bg-background px-4 py-3 outline-none focus:ring-2 focus:ring-ring"
           />
         </label>
-        <button
+        <label className="flex items-start gap-3 text-sm"><input type="checkbox" checked={redacted} onChange={e => setRedacted(e.target.checked)} className="mt-1" />I have removed all phone numbers, account numbers and addresses from this file.</label>
+        <Button
           onClick={run}
-          disabled={!file || !promise.trim() || !!status}
+          disabled={!file || !promise.trim() || !provider.trim() || !redacted || !!status}
           className="w-full rounded-lg bg-primary px-4 py-3 font-medium text-primary-foreground transition hover:opacity-90 disabled:opacity-50"
         >
           {status ?? "Check my bill"}
-        </button>
+        </Button>
         {error && <p className="text-sm text-destructive">{error}</p>}
       </section>
 
@@ -149,7 +177,7 @@ function Index() {
               {check.billTotal != null && (<><dt className="text-muted-foreground">Total on bill</dt><dd className="text-right">{inr(check.billTotal)}</dd></>)}
               {check.planDifference != null && check.planDifference !== 0 && (<><dt className="text-muted-foreground">Plan line vs promised</dt><dd className="text-right text-destructive">{check.planDifference > 0 ? "+" : ""}{inr(check.planDifference)}</dd></>)}
               {check.billTax != null && (<><dt className="text-muted-foreground">Tax on bill</dt><dd className="text-right">{inr(check.billTax)}</dd></>)}
-              {check.expectedTotal != null && (<><dt className="text-muted-foreground">Promised {inr(check.promisedPrice!)} + GST</dt><dd className="text-right">{inr(check.expectedTotal)}</dd></>)}
+              {check.expectedTotal != null && (<><dt className="text-muted-foreground">Promised {inr(check.promisedPrice)} + GST</dt><dd className="text-right">{inr(check.expectedTotal)}</dd></>)}
               {check.difference != null && (
                 <>
                   <dt className="border-t pt-2 font-medium">Difference from promise</dt>
@@ -162,20 +190,8 @@ function Index() {
             {check.promisedPrice == null && <p className="mt-3 text-xs text-muted-foreground">Add a price (e.g. ₹749) to your promise to see the difference.</p>}
           </section>
 
-          {message && (
-            <section className="mt-6 rounded-xl border bg-card p-6 shadow-soft">
-              <div className="mb-3 flex items-center justify-between">
-                <h2 className="font-display text-lg font-semibold">Draft complaint</h2>
-                <button
-                  onClick={async () => { await navigator.clipboard.writeText(message); setCopied(true); setTimeout(() => setCopied(false), 1500); }}
-                  className="rounded-md border px-3 py-1.5 text-sm hover:bg-muted"
-                >
-                  {copied ? "Copied!" : "Copy"}
-                </button>
-              </div>
-              <textarea value={message} onChange={(e) => setMessage(e.target.value)} rows={16} className="w-full rounded-lg border bg-background p-4 text-sm leading-relaxed outline-none focus:ring-2 focus:ring-ring" />
-            </section>
-          )}
+          {message && saved && <SavedMessage key={saved.messageId} id={saved.messageId} draft={message} sent={false} />}
+
         </>
       )}
     </main>
