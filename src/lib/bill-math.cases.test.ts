@@ -64,7 +64,8 @@ describe("US card statement (classmate test)", () => {
     const c = checkBill(ex, "", "I wanted to check the bill for Clayton on 1st July");
     expect(complaintLines(c).map((l) => l.label)).toEqual(["01 Jul – VSI*CENTER OF CLAYTON, CLAYTON MO"]);
     const m = templateMessage(c, "");
-    expect(m).toContain("$78.00");
+    expect(m).toContain("CLAYTON MO: $78.00\n");
+    expect(m).not.toContain("You asked");
     expect(m).not.toContain("GST");
     expect(m).not.toContain("₹");
     expect(foreignNumbers(m, c)).toEqual([]);

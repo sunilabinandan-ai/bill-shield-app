@@ -250,9 +250,10 @@ export function templateMessage(c: BillCheck, promise: string): string {
   const flagged = complaintLines(c);
   const list = flagged.map((l) => `- ${l.label}: ${money(l.amount)} (${l.flag}: ${l.reason})`).join("\n");
   if (c.docType === "card_statement") {
+    const txns = flagged.map((l) => `- ${l.label}: ${money(l.amount)}`).join("\n");
     return `Dear Customer Care,
 
-${flagged.length ? `I would like to query the following transaction${flagged.length > 1 ? "s" : ""} on my statement:\n${list}\n\n` : ""}Please provide:
+${flagged.length ? `I would like to query the following transaction${flagged.length > 1 ? "s" : ""} on my statement:\n${txns}\n\n` : ""}Please provide:
 - The full merchant name and contact details, and the date and time of the transaction.
 - A copy of the receipt or transaction record.
 - Confirmation of whether this was authorised on my card.
