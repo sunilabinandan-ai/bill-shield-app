@@ -110,7 +110,7 @@ function Index() {
       </header>
 
       <section className="space-y-5 rounded-xl border bg-card p-6 shadow-soft">
-        <label className="block text-sm">Provider<input required value={provider} onChange={e => setProvider(e.target.value)} placeholder="Vi" className="mt-2 w-full rounded-md border bg-background px-4 py-3" /></label>
+        <label className="block text-sm">Company that sent the bill<span className="mt-1 block text-xs text-muted-foreground">The phone, utility or card company, not the shop.</span><input required value={provider} onChange={e => setProvider(e.target.value)} placeholder="e.g. Vi, Airtel, American Express" className="mt-2 w-full rounded-md border bg-background px-4 py-3" /></label>
         <label className="block text-sm">Bill period (optional)<input value={billPeriod} onChange={e => setBillPeriod(e.target.value)} placeholder="October 2026" className="mt-2 w-full rounded-md border bg-background px-4 py-3" /></label>
         <label className="block">
           <span className="text-sm font-medium">1. Your bill (image or PDF)</span>
@@ -123,7 +123,7 @@ function Index() {
         </label>
         <label className="block">
           <span className="text-sm font-medium">2. What were you promised?</span>
-          <span className="mt-1 block text-xs text-muted-foreground">For a phone or utility bill. Leave blank for a card statement.</span>
+          <span className="mt-1 block text-xs text-muted-foreground">Your plan price and what's included, e.g. "₹749 plan, roaming off". For a card statement, leave this empty and use box 3.</span>
           <input
             value={promise}
             onChange={(e) => setPromise(e.target.value)}
