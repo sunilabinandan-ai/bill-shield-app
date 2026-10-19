@@ -23,7 +23,8 @@ const billSchema = {
 };
 
 const EXTRACT_PROMPT = `Read this phone/utility bill and return three separate things, copied exactly as printed:
-(a) charges: each charge from the MAIN CHARGE SUMMARY only (plan/rental, add-ons, usage charges, one-time fees, discounts as negative numbers). Set isPlan=true only for the main plan/rental line.
+(a) charges: EVERY row of the MAIN CHARGE SUMMARY table, in printed order, INCLUDING rows whose amount is 0.00 (plan/rental, one-time, usage, roaming, add-ons, other charges; discounts as negative numbers). Set isPlan=true only for the main plan/rental line.
+LABEL ACCURACY: each label must be the exact text printed on the SAME ROW as its amount. Before answering, re-check every label/amount pair against the image row by row; never shift a label up or down to a neighbouring row.
 (b) taxes: each tax line (GST, CGST, SGST, IGST).
 (c) statedTotal: the bill's stated total for the current period's charges (amount including tax), or null if none.
 Never extract phone numbers, account numbers or addresses; omit them from labels.
