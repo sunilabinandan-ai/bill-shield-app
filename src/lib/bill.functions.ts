@@ -1,5 +1,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
+import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
+import { privateText } from "./saving-rules";
 import type { BillCheck, Extracted } from "./bill-math";
 
 const amountLine = (extra: Record<string, unknown> = {}) => ({
@@ -24,9 +26,11 @@ const EXTRACT_PROMPT = `Read this phone/utility bill and return three separate t
 (a) charges: each charge from the MAIN CHARGE SUMMARY only (plan/rental, add-ons, usage charges, one-time fees, discounts as negative numbers). Set isPlan=true only for the main plan/rental line.
 (b) taxes: each tax line (GST, CGST, SGST, IGST).
 (c) statedTotal: the bill's stated total for the current period's charges (amount including tax), or null if none.
+Never extract phone numbers, account numbers or addresses; omit them from labels.
 Rules: extract each charge ONLY ONCE — bills repeat charges on summary and detail pages; use only the main summary. IGNORE itemised call/data/SMS logs, daily usage rows, previous balance, payments received, amount due carried forward, and any subtotal/total rows inside charges or taxes. Do NOT calculate, add up or invent anything.`;
 
 export const extractBill = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
   .inputValidator((d) =>
     z.object({ fileName: z.string(), mimeType: z.string(), base64: z.string().min(1).max(15_000_000) }).parse(d),
   )
@@ -43,8 +47,8 @@ export const extractBill = createServerFn({ method: "POST" })
     try {
       const p = JSON.parse(text) as Extracted;
       return {
-        charges: p.charges.filter((l) => Number.isFinite(l.amount)),
-        taxes: p.taxes.filter((l) => Number.isFinite(l.amount)),
+        charges: p.charges.filter((l) => Number.isFinite(l.amount)).map(l => ({ ...l, label: privateText(l.label) })),
+        taxes: p.taxes.filter((l) => Number.isFinite(l.amount)).map(l => ({ ...l, label: privateText(l.label) })),
         statedTotal: typeof p.statedTotal === "number" && Number.isFinite(p.statedTotal) ? p.statedTotal : null,
       };
     } catch {
@@ -53,6 +57,7 @@ export const extractBill = createServerFn({ method: "POST" })
   });
 
 export const draftComplaint = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
   .inputValidator((d) => z.object({ promise: z.string().max(500), check: z.any() }).parse(d))
   .handler(async ({ data }): Promise<{ message: string; usedFallback: boolean }> => {
     const { foreignNumbers, templateMessage, complaintLines, ensureSignOff, SIGN_OFF } = await import("./bill-math");
