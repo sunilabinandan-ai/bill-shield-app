@@ -4,13 +4,13 @@ import { requireSupabaseAuth } from '@/integrations/supabase/auth-middleware';
 import { checkBill } from './bill-math';
 import { privateText, wordsChanged } from './saving-rules';
 
-const extractedSchema = z.object({ charges: z.array(z.object({ label: z.string(), amount: z.number().finite(), isPlan: z.boolean() })), taxes: z.array(z.object({ label: z.string(), amount: z.number().finite() })), statedTotal: z.number().finite().nullable() });
+const extractedSchema = z.object({ charges: z.array(z.object({ label: z.string(), amount: z.number().finite(), isPlan: z.boolean() })), taxes: z.array(z.object({ label: z.string(), amount: z.number().finite() })), statedTotal: z.number().finite().nullable(), currency: z.string().max(3).nullable().optional(), docType: z.enum(['bill', 'card_statement']).nullable().optional() });
 export const saveBill = createServerFn({ method: 'POST' }).middleware([requireSupabaseAuth])
-.inputValidator((input) => z.object({ provider: z.string().min(1).max(100), billPeriod: z.string().max(100), filePath: z.string(), promise: z.string().max(500), message: z.string().max(20000), extracted: extractedSchema }).parse(input))
+.inputValidator((input) => z.object({ provider: z.string().min(1).max(100), billPeriod: z.string().max(100), filePath: z.string(), promise: z.string().max(500), focus: z.string().max(300).optional(), message: z.string().max(20000), extracted: extractedSchema }).parse(input))
 .handler(async ({ data, context }) => {
   if (!data.filePath.startsWith(`${context.userId}/`)) throw new Error('Invalid file path');
   const promise = privateText(data.promise);
-  const check = checkBill(data.extracted, promise);
+  const check = checkBill(data.extracted, promise, privateText(data.focus ?? ''));
   const { data: saved, error } = await context.supabase.rpc('save_bill_check', { payload: {
     provider: privateText(data.provider), bill_period: privateText(data.billPeriod), file_path: data.filePath,
     promise, promised_price: check.promisedPrice, total_on_bill: check.billTotal, calculated_total: check.computedTotal,
