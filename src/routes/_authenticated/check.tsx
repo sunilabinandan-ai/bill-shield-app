@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { SavedMessage } from "@/components/saved-message";
 import { supabase } from "@/integrations/supabase/client";
@@ -55,9 +55,15 @@ function Index() {
   const [billPeriod, setBillPeriod] = useState("");
   const [redacted, setRedacted] = useState(false);
   const [saved, setSaved] = useState<{ billId: string; messageId: string } | null>(null);
+  const resultsRef = useRef<HTMLDivElement | null>(null);
+  const [lastRunKey, setLastRunKey] = useState<string | null>(null);
+  const runKey = [file?.name, file?.size, file?.lastModified, provider, billPeriod, promise, focus].join("|");
+  const alreadyChecked = !!check && lastRunKey === runKey;
+  const showResults = () => resultsRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
 
   async function run() {
     if (!file || !(promise.trim() || focus.trim()) || !provider.trim() || !redacted) return;
+    if (alreadyChecked) { showResults(); return; }
     if (file.size > 10 * 1024 * 1024) { setError("Choose a bill smaller than 10 MB."); return; }
     if (privateText(promise) !== promise || privateText(provider) !== provider || privateText(billPeriod) !== billPeriod || privateText(focus) !== focus) { setError("Remove phone numbers, account numbers and addresses from these fields."); return; }
     setSaved(null);
@@ -72,6 +78,7 @@ function Index() {
       if (!extracted.charges.length) throw new Error("No charges found on the bill.");
       const c = checkBill(extracted, promise, focus);
       setCheck(c);
+      setLastRunKey(runKey);
       setStatus("Drafting your message…");
       const d = await draft({ data: { promise, focus, check: c } });
       setMessage(privateText(d.message));
@@ -91,10 +98,12 @@ function Index() {
       try {
         const record = await save({ data: { provider: provider.trim(), billPeriod, filePath, promise, focus, message: d.message, extracted } });
         setSaved(record); setMessage(privateText(d.message));
+        setTimeout(showResults, 150);
         await cache.invalidateQueries({ queryKey: ["bills"] });
       } catch (error) { await supabase.storage.from("bills-private").remove([filePath]); throw error; }
     } catch (e) {
       setError(e instanceof Error ? e.message : "Something went wrong.");
+      setTimeout(showResults, 150);
     } finally {
       setStatus(null);
     }
@@ -147,11 +156,17 @@ function Index() {
           disabled={!file || !(promise.trim() || focus.trim()) || !provider.trim() || !redacted || !!status}
           className="w-full rounded-lg bg-primary px-4 py-3 font-medium text-primary-foreground transition hover:opacity-90 disabled:opacity-50"
         >
-          {status ?? "Check my bill"}
+          {status ?? (alreadyChecked ? "Checked ✓ — see results below" : "Check my bill")}
         </Button>
         {error && <p className="text-sm text-destructive">{error}</p>}
+        {check && !status && (
+          <button type="button" onClick={showResults} className="w-full rounded-lg border border-primary/40 bg-primary/5 px-4 py-3 text-sm font-medium text-primary">
+            ✓ Done. Your results and draft message are below ↓
+          </button>
+        )}
       </section>
 
+      <div ref={resultsRef} className="scroll-mt-4" />
       {check && (() => { const inr = fmt(check.currency || "₹"); return (
         <>
           {check.docType === "card_statement" && !check.lines.some((l) => l.flag !== "OK") && (
