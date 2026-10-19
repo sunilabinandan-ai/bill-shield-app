@@ -14,13 +14,154 @@ export type Database = {
   }
   public: {
     Tables: {
-      [_ in never]: never
+      bills: {
+        Row: {
+          bill_period: string | null
+          calculated_total: number
+          created_at: string
+          file_path: string
+          id: string
+          provider: string
+          total_on_bill: number | null
+          user_id: string
+        }
+        Insert: {
+          bill_period?: string | null
+          calculated_total: number
+          created_at?: string
+          file_path: string
+          id?: string
+          provider: string
+          total_on_bill?: number | null
+          user_id: string
+        }
+        Update: {
+          bill_period?: string | null
+          calculated_total?: number
+          created_at?: string
+          file_path?: string
+          id?: string
+          provider?: string
+          total_on_bill?: number | null
+          user_id?: string
+        }
+        Relationships: []
+      }
+      line_items: {
+        Row: {
+          amount: number
+          bill_id: string
+          flag: string
+          id: string
+          label: string
+          note: string | null
+          user_id: string
+        }
+        Insert: {
+          amount: number
+          bill_id: string
+          flag: string
+          id?: string
+          label: string
+          note?: string | null
+          user_id: string
+        }
+        Update: {
+          amount?: number
+          bill_id?: string
+          flag?: string
+          id?: string
+          label?: string
+          note?: string | null
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "line_items_bill_id_user_id_fkey"
+            columns: ["bill_id", "user_id"]
+            isOneToOne: false
+            referencedRelation: "bills"
+            referencedColumns: ["id", "user_id"]
+          },
+        ]
+      }
+      messages: {
+        Row: {
+          created_at: string
+          edited_text: string | null
+          id: string
+          line_item_id: string | null
+          message_text: string
+          sent: boolean
+          sent_at: string | null
+          user_id: string
+          words_changed: number
+        }
+        Insert: {
+          created_at?: string
+          edited_text?: string | null
+          id?: string
+          line_item_id?: string | null
+          message_text: string
+          sent?: boolean
+          sent_at?: string | null
+          user_id: string
+          words_changed?: number
+        }
+        Update: {
+          created_at?: string
+          edited_text?: string | null
+          id?: string
+          line_item_id?: string | null
+          message_text?: string
+          sent?: boolean
+          sent_at?: string | null
+          user_id?: string
+          words_changed?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "messages_line_item_id_user_id_fkey"
+            columns: ["line_item_id", "user_id"]
+            isOneToOne: false
+            referencedRelation: "line_items"
+            referencedColumns: ["id", "user_id"]
+          },
+        ]
+      }
+      promises: {
+        Row: {
+          created_at: string
+          id: string
+          promise_text: string
+          promised_price: number | null
+          provider: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          promise_text: string
+          promised_price?: number | null
+          provider: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          promise_text?: string
+          promised_price?: number | null
+          provider?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
     }
     Functions: {
-      [_ in never]: never
+      save_bill_check: { Args: { payload: Json }; Returns: Json }
     }
     Enums: {
       [_ in never]: never
