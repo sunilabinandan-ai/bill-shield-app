@@ -102,3 +102,54 @@ describe("every line checks out (Shobhit's test)", () => {
     expect(allClear(c)).toBe(false);
   });
 });
+
+describe("Varun's Axis card statement (stranger test)", () => {
+  const L = (label: string, amount: number) => ({ label, amount, isPlan: false });
+  const charges = [
+    L("20 Sep – EMI INTEREST - 2/3", 120), L("20 Sep – GST", 21.6), L("20 Sep – EMI PRINCIPAL - 2/3", 4485), L("25 Sep – NETFLIX, MUMBAI", 649),
+    L("28 Sep – ADOBE SYSTEMS, GURUGRAM", 1516.3), L("01 Oct – GOOGLE PLAY, MUMBAI", 399), L("03 Oct – GOOGLE WORKSPACE, MUMBAI", 116.82),
+    L("03 Oct – GOOGLE WORKSPACE, MUMBAI", 325.68), L("05 Oct – HDFC ERGO GIC, MUMBAI", 21718.79), L("08 Oct – ANTHROPIC* CLAUDE SUB", 2399),
+    L("09 Oct – ANTHROPIC* CLAUDE SUB", 2284.72), L("10 Oct – DCC MARKUP", 83.97), L("10 Oct – GST", 15.12), L("11 Oct – GST", 14.4),
+    L("11 Oct – FOREIGN CURRENCY TRANSACTION FEE", 79.97), L("12 Oct – RAZ*WIXCOM, BENGALURU", 330.4), L("13 Oct – YOUTUBE, MUMBAI", 299),
+    L("16 Oct – AMAZON INDIA, MUMBAI", 199), L("17 Oct – M S PUTCHI NEXUS, COIMBATORE", 2878),
+  ];
+  const ex = { docType: "card_statement" as const, currency: "₹", charges, taxes: [], statedTotal: null,
+    totalParts: [{ label: "Purchase", amount: 37600.71 }, { label: "Cash Advance", amount: 0 }, { label: "Other Debit & Charges", amount: 335.06 }] };
+  it("code adds the summary parts and every line checks out", () => {
+    const c = checkBill(ex, "", "");
+    expect(c.billTotal).toBe(37935.77);
+    expect(c.computedTotal).toBe(37935.77);
+    expect(c.totalMismatch).toBe(false);
+    expect(allClear(c)).toBe(true);
+  });
+  it("a real mismatch gets its own sentence, never 'Total on bill' as a transaction", () => {
+    const c = checkBill({ ...ex, charges: charges.filter((l) => l.label !== "11 Oct – GST") }, "", "");
+    expect(c.totalMismatch).toBe(true);
+    expect(complaintLines(c).some((l) => l.label === "Total on bill")).toBe(false);
+    const m = templateMessage(c, "");
+    expect(m).toContain("a difference of ₹14.40");
+    expect(m).not.toContain("- Total on bill");
+    expect(foreignNumbers(m, c)).toEqual([]);
+  });
+});
+
+describe("Varun's Axis statement: fees and GST count, code adds the summary parts", () => {
+  const debits = [120, 21.6, 4485, 649, 1516.3, 399, 116.82, 325.68, 21718.79, 2399, 2284.72, 83.97, 15.12, 14.4, 79.97, 330.4, 299, 199, 2878];
+  const charges = debits.map((amount, i) => ({ label: `line ${i}`, amount, isPlan: false }));
+  const parts = [{ label: "Purchase", amount: 37600.71 }, { label: "Cash Advance", amount: 0 }, { label: "Other Debit & Charges", amount: 335.06 }];
+  it("all 19 debits match purchase + other charges: no false ₹284 gap", () => {
+    const c = checkBill({ docType: "card_statement", currency: "₹", charges, taxes: [], statedTotal: null, totalParts: parts }, "", "");
+    expect(c.billTotal).toBe(37935.77);
+    expect(c.computedTotal).toBe(37935.77);
+    expect(c.totalMismatch).toBe(false);
+    expect(allClear(c)).toBe(true);
+  });
+  it("a real mismatch is one sentence, never a 'transaction'", () => {
+    const c = checkBill({ docType: "card_statement", currency: "₹", charges: charges.slice(1), taxes: [], statedTotal: null, totalParts: parts }, "", "");
+    expect(c.totalMismatch).toBe(true);
+    const m = templateMessage(c, "");
+    expect(m).not.toMatch(/following transaction|Total on bill/);
+    expect(m).toContain("a difference of ₹120.00");
+    expect(foreignNumbers(m, c)).toEqual([]);
+  });
+});

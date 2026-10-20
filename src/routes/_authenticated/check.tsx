@@ -8,7 +8,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { saveBill } from "@/lib/saved-bills.functions";
 import { privateText } from "@/lib/saving-rules";
 import { useQueryClient } from "@tanstack/react-query";
-import { allClear, allClearMessage, checkBill, type BillCheck } from "@/lib/bill-math";
+import { allClear, allClearMessage, checkBill, templateMessage, type BillCheck, type Extracted } from "@/lib/bill-math";
 import { draftComplaint, extractBill } from "@/lib/bill.functions";
 
 export const Route = createFileRoute("/_authenticated/check")({
@@ -58,12 +58,35 @@ function Index() {
   const [saved, setSaved] = useState<{ billId: string; messageId: string } | null>(null);
   const resultsRef = useRef<HTMLDivElement | null>(null);
   const [lastRunKey, setLastRunKey] = useState<string | null>(null);
+  const [extracted, setExtracted] = useState<{ key: string; data: Extracted } | null>(null);
+  const [dragging, setDragging] = useState(false);
+  const fileKey = (f: File) => [f.name, f.size, f.lastModified].join("|");
+  const mimeOf = (f: File) => f.type || (/\.pdf$/i.test(f.name) ? "application/pdf" : /\.png$/i.test(f.name) ? "image/png" : "image/jpeg");
+
+  async function readBill(f: File): Promise<Extracted> {
+    if (extracted && extracted.key === fileKey(f)) return extracted.data;
+    if (f.size > 10 * 1024 * 1024) throw new Error("Choose a bill smaller than 10 MB.");
+    const base64 = await toBase64(f);
+    const data = await extract({ data: { fileName: f.name, mimeType: mimeOf(f), base64 } });
+    setExtracted({ key: fileKey(f), data });
+    if (data.provider) setProvider((p) => p.trim() ? p : data.provider ?? "");
+    if (data.billPeriod) setBillPeriod((p) => p.trim() ? p : data.billPeriod ?? "");
+    return data;
+  }
+
+  async function pickFile(f: File | null) {
+    setFile(f); setCheck(null); setSaved(null); setMessage(""); setError(null);
+    if (!f || !redacted) return;
+    try { setStatus("Reading your bill… about 30 seconds"); await readBill(f); }
+    catch (e) { setError(e instanceof Error ? e.message : "Couldn't read the bill."); }
+    finally { setStatus(null); }
+  }
   const runKey = [file?.name, file?.size, file?.lastModified, provider, billPeriod, promise, focus].join("|");
   const alreadyChecked = !!check && lastRunKey === runKey;
   const showResults = () => resultsRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
 
   async function run() {
-    if (!file || !(promise.trim() || focus.trim()) || !provider.trim() || !redacted) return;
+    if (!file || !redacted) return;
     if (alreadyChecked) { showResults(); return; }
     if (file.size > 10 * 1024 * 1024) { setError("Choose a bill smaller than 10 MB."); return; }
     if (privateText(promise) !== promise || privateText(provider) !== provider || privateText(billPeriod) !== billPeriod || privateText(focus) !== focus) { setError("Remove phone numbers, account numbers and addresses from these fields."); return; }
@@ -72,16 +95,18 @@ function Index() {
     setCheck(null);
     setMessage("");
     try {
-      setStatus("Reading your bill…");
-      const base64 = await toBase64(file);
-      const mimeType = file.type || (/\.pdf$/i.test(file.name) ? "application/pdf" : /\.png$/i.test(file.name) ? "image/png" : "image/jpeg");
-      const extracted = await extract({ data: { fileName: file.name, mimeType, base64 } });
-      if (!extracted.charges.length) throw new Error("No charges found on the bill.");
-      const c = checkBill(extracted, promise, focus);
+      setStatus("Reading your bill… about 30 seconds");
+      const data = await readBill(file);
+      if (!data.charges.length) throw new Error("No charges found on the bill.");
+      const c = checkBill(data, promise, focus);
       setCheck(c);
       setLastRunKey(runKey);
       setStatus("Drafting your message…");
-      const d = allClear(c) ? { message: allClearMessage(c), usedFallback: false } : await draft({ data: { promise, focus, check: c } });
+      const d = allClear(c)
+        ? { message: allClearMessage(c), usedFallback: false }
+        : c.totalMismatch
+          ? { message: templateMessage(c, promise), usedFallback: true }
+          : await draft({ data: { promise, focus, check: c } });
       setMessage(privateText(d.message));
       setStatus("Saving your bill…");
       const { data: userData } = await supabase.auth.getUser();
@@ -97,7 +122,7 @@ function Index() {
         throw new Error(`Your results are below, but the bill file could not be saved (${uploadError.message}). Try again on a computer or with a smaller file.`);
       }
       try {
-        const record = await save({ data: { provider: provider.trim(), billPeriod, filePath, promise, focus, message: d.message, extracted } });
+        const record = await save({ data: { provider: provider.trim() || data.provider || "Unknown", billPeriod: billPeriod || data.billPeriod || "", filePath, promise, focus, message: d.message, extracted: data } });
         setSaved(record); setMessage(privateText(d.message));
         setTimeout(showResults, 150);
         await cache.invalidateQueries({ queryKey: ["bills"] });
@@ -121,20 +146,26 @@ function Index() {
 
       <HowToGuide collapsible />
       <section className="space-y-5 rounded-xl border bg-card p-6 shadow-soft">
-        <label className="block text-sm">Company that sent the bill<span className="mt-1 block text-xs text-muted-foreground">The phone, utility or card company, not the shop.</span><input required value={provider} onChange={e => setProvider(e.target.value)} placeholder="e.g. Vi, Airtel, American Express" className="mt-2 w-full rounded-md border bg-background px-4 py-3" /></label>
-        <label className="block text-sm">Bill period (optional)<input value={billPeriod} onChange={e => setBillPeriod(e.target.value)} placeholder="October 2026" className="mt-2 w-full rounded-md border bg-background px-4 py-3" /></label>
+        <div>
+          <span className="text-sm font-medium">1. Upload your bill (photo, screenshot or PDF)</span>
+          <label className="mt-2 flex items-start gap-3 text-sm"><input type="checkbox" checked={redacted} onChange={e => { setRedacted(e.target.checked); if (e.target.checked && file && !extracted) void pickFile(file); }} className="mt-1" />I have blacked out my name, phone number, account number and address.</label>
+          <label
+            onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
+            onDragLeave={() => setDragging(false)}
+            onDrop={(e) => { e.preventDefault(); setDragging(false); const f = e.dataTransfer.files?.[0]; if (f) void pickFile(f); }}
+            className={`mt-3 flex cursor-pointer flex-col items-center justify-center rounded-lg border-2 border-dashed p-6 text-center text-sm transition ${dragging ? "border-primary bg-primary/5" : "bg-muted"} ${!redacted ? "opacity-60" : ""}`}
+          >
+            <span className="font-medium">{file ? file.name : "Drag and drop your bill here"}</span>
+            <span className="mt-1 text-muted-foreground">{file ? "Click to choose a different file" : "or click to choose a file"}</span>
+            {!redacted && <span className="mt-2 text-xs text-destructive">Tick the box above first.</span>}
+            <input type="file" accept="image/*,application/pdf" className="sr-only" disabled={!redacted} onChange={(e) => void pickFile(e.target.files?.[0] ?? null)} />
+          </label>
+        </div>
+        <label className="block text-sm">2. Company that sent the bill<span className="mt-1 block text-xs text-muted-foreground">Filled in from your bill. Change it if it's wrong.</span><input value={provider} onChange={e => setProvider(e.target.value)} placeholder="e.g. Vi, Airtel, Axis Bank" className="mt-2 w-full rounded-md border bg-background px-4 py-3" /></label>
+        <label className="block text-sm">3. Bill period (optional)<span className="mt-1 block text-xs text-muted-foreground">Filled in from your bill.</span><input value={billPeriod} onChange={e => setBillPeriod(e.target.value)} placeholder="e.g. 12 Aug – 11 Sep 2026" className="mt-2 w-full rounded-md border bg-background px-4 py-3" /></label>
         <label className="block">
-          <span className="text-sm font-medium">1. Your bill (image or PDF)</span>
-          <input
-            type="file"
-            accept="image/*,application/pdf"
-            onChange={(e) => setFile(e.target.files?.[0] ?? null)}
-            className="mt-2 block w-full rounded-lg border border-dashed bg-muted p-4 text-sm file:mr-4 file:rounded-md file:border-0 file:bg-primary file:px-3 file:py-1.5 file:text-primary-foreground"
-          />
-        </label>
-        <label className="block">
-          <span className="text-sm font-medium">2. What were you promised?</span>
-          <span className="mt-1 block text-xs text-muted-foreground">Your plan price and what's included, e.g. "₹749 plan, roaming off". For a card statement, leave this empty and use box 3.</span>
+          <span className="text-sm font-medium">4. What were you promised? (optional)</span>
+          <span className="mt-1 block text-xs text-muted-foreground">Your plan price and what's included, e.g. "₹749 plan, roaming off". Leave empty for a card statement.</span>
           <input
             value={promise}
             onChange={(e) => setPromise(e.target.value)}
@@ -143,8 +174,8 @@ function Index() {
           />
         </label>
         <label className="block">
-          <span className="text-sm font-medium">3. Which charge do you want to question? (optional)</span>
-          <span className="mt-1 block text-xs text-muted-foreground">Merchant or charge name, and the date if you know it.</span>
+          <span className="text-sm font-medium">5. Which charge do you want to check? (optional)</span>
+          <span className="mt-1 block text-xs text-muted-foreground">The name of the charge or shop, and the date if you know it.</span>
           <input
             value={focus}
             onChange={(e) => setFocus(e.target.value)}
@@ -152,14 +183,19 @@ function Index() {
             className="mt-2 w-full rounded-lg border bg-background px-4 py-3 outline-none focus:ring-2 focus:ring-ring"
           />
         </label>
-        <label className="flex items-start gap-3 text-sm"><input type="checkbox" checked={redacted} onChange={e => setRedacted(e.target.checked)} className="mt-1" />I have removed all phone numbers, account numbers and addresses from this file.</label>
         <Button
           onClick={run}
-          disabled={!file || !(promise.trim() || focus.trim()) || !provider.trim() || !redacted || !!status}
+          disabled={!file || !redacted || !!status}
           className="w-full rounded-lg bg-primary px-4 py-3 font-medium text-primary-foreground transition hover:opacity-90 disabled:opacity-50"
         >
           {status ?? (alreadyChecked ? "Checked ✓ — see results below" : "Check my bill")}
         </Button>
+        {status && (
+          <div role="status" className="flex items-center gap-3 rounded-lg border bg-muted px-4 py-3 text-sm">
+            <span className="h-4 w-4 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+            {status} Please keep this page open.
+          </div>
+        )}
         {error && <p className="text-sm text-destructive">{error}</p>}
         {check && !status && (
           <button type="button" onClick={showResults} className="w-full rounded-lg border border-primary/40 bg-primary/5 px-4 py-3 text-sm font-medium text-primary">

@@ -14,13 +14,16 @@ const amountLine = (extra: Record<string, unknown> = {}) => ({
 const billSchema = {
   type: "object",
   additionalProperties: false,
-  required: ["docType", "currency", "charges", "taxes", "statedTotal"],
+  required: ["docType", "currency", "provider", "billPeriod", "charges", "taxes", "statedTotal", "totalParts"],
   properties: {
+    provider: { type: "string" },
+    billPeriod: { type: "string" },
     docType: { type: "string", enum: ["bill", "card_statement"] },
     currency: { type: "string" },
     charges: { type: "array", items: amountLine({ isPlan: { type: "boolean" } }) },
     taxes: { type: "array", items: amountLine() },
     statedTotal: { type: ["number", "null"] },
+    totalParts: { type: "array", items: amountLine() },
   },
 };
 
@@ -28,11 +31,13 @@ const EXTRACT_PROMPT = `First decide what this document is:
 - docType "card_statement" if it is a credit/debit card statement (lists purchases from many merchants, with a previous balance, payments and a new balance).
 - docType "bill" for a phone, broadband, electricity, gas, water or similar bill.
 Also return currency: the currency symbol printed on the document (e.g. "₹", "$", "€", "£").
+Also return provider: the short name of the company that issued the bill or card (e.g. "Vi", "Airtel", "American Express", "HDFC Bank"), or "" if unclear. And billPeriod: the billing period or statement period as printed (e.g. "12 Aug 2026 – 11 Sep 2026"), or "". Never include the customer's name, numbers or address in these.
 
 IF docType is "card_statement":
-(a) charges: EVERY individual purchase/transaction listed under this period's NEW CHARGES, in printed order. Label format: "DD Mon – MERCHANT, CITY STATE" (e.g. "01 Jul – VSI*CENTER OF CLAYTON, CLAYTON MO"). Amount as printed. isPlan=false. Do NOT include payments, credits, refunds, previous balance, interest or fees.
-(b) taxes: [] (card statements do not have tax lines).
-(c) statedTotal: the statement's printed TOTAL NEW CHARGES for this period (NOT the new balance, NOT the minimum payment).
+(a) charges: EVERY DEBIT line dated in this statement period, in printed order: purchases, EMI principal and interest, fees, markups, interest AND GST lines. Label format: "DD Mon – DESCRIPTION, CITY" (e.g. "01 Jul – VSI*CENTER OF CLAYTON, CLAYTON MO", "11 Oct – GST"). Amount as printed. isPlan=false. Do NOT include payments, credits or refunds (Cr), previous balance, EMI balances or any total rows.
+(b) taxes: [] (put GST lines in charges for card statements).
+(c) totalParts: the statement SUMMARY's separate components that make up this period's new debits, each exactly as printed, e.g. "Purchase" 37600.71, "Cash Advance" 0, "Other Debit & Charges" 335.06; or "New Charges" 1725.82, "Fees" 0, "Interest Charged" 0. Do NOT include previous balance, payments or credits, and do NOT add them up yourself.
+(d) statedTotal: null.
 Never include card or account numbers, cardholder names or addresses in labels.
 
 IF docType is "bill", return three separate things, copied exactly as printed:
@@ -42,6 +47,7 @@ MOST SPECIFIC LABEL: bills often show the same charge in more than one table und
 (b) taxes: each tax line (GST, CGST, SGST, IGST).
 (c) statedTotal: the bill's stated total for the current period's charges (amount including tax), or null if none.
 Never extract phone numbers, account numbers or addresses; omit them from labels.
+(d) totalParts: [].
 Rules: extract each charge ONLY ONCE — bills repeat charges on summary and detail pages; use only the main summary. IGNORE itemised call/data/SMS logs, daily usage rows, previous balance, payments received, amount due carried forward, and any subtotal/total rows inside charges or taxes. Do NOT calculate, add up or invent anything.`;
 
 export const extractBill = createServerFn({ method: "POST" })
@@ -64,9 +70,12 @@ export const extractBill = createServerFn({ method: "POST" })
       return {
         docType: p.docType === "card_statement" ? "card_statement" : "bill",
         currency: typeof p.currency === "string" ? p.currency.slice(0, 3) : null,
+        provider: typeof p.provider === "string" ? privateText(p.provider).slice(0, 60) : "",
+        billPeriod: typeof p.billPeriod === "string" ? privateText(p.billPeriod).slice(0, 60) : "",
         charges: p.charges.filter((l) => Number.isFinite(l.amount)).map(l => ({ ...l, label: privateText(l.label) })),
         taxes: p.taxes.filter((l) => Number.isFinite(l.amount)).map(l => ({ ...l, label: privateText(l.label) })),
         statedTotal: typeof p.statedTotal === "number" && Number.isFinite(p.statedTotal) ? p.statedTotal : null,
+        totalParts: Array.isArray(p.totalParts) ? p.totalParts.filter((l) => Number.isFinite(l.amount)).map((l) => ({ label: privateText(l.label), amount: l.amount })) : [],
       };
     } catch {
       throw new Error("Couldn't read the bill. Try a clearer image.");

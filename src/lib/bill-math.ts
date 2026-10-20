@@ -12,6 +12,11 @@ export type Extracted = {
   statedTotal: number | null;
   /** Currency symbol as printed on the bill, e.g. "₹" or "$". Defaults to ₹. */
   currency?: string | null | undefined;
+  /** Card statements: the summary's parts of this period's new debits, added up by code. */
+  totalParts?: TaxLine[] | null | undefined;
+  /** Company and bill period as printed (for pre-filling the form). */
+  provider?: string | null | undefined;
+  billPeriod?: string | null | undefined;
   /** A phone/utility bill, or a credit/debit card statement. Defaults to bill. */
   docType?: DocType | null | undefined;
 };
@@ -39,6 +44,8 @@ export type BillCheck = {
   difference: number | null;
   unexplainedTotal: number;
   totalMismatch: boolean;
+  /** Bill's stated total minus code's total, when they don't match. */
+  totalDifference: number | null;
   warning: string | null;
 };
 
@@ -132,10 +139,14 @@ export function checkBill(extracted: Extracted, promise: string, focus = ""): Bi
   const gst = hasTax ? round2(sumOfCharges * GST_RATE) : 0;
   const computedTotal = round2(sumOfCharges + gst);
   const billTax = taxes.length ? round2(taxes.reduce((s, l) => s + l.amount, 0)) : null;
+  const parts = (extracted.totalParts ?? []).filter((l) => Number.isFinite(l.amount));
+  const partsTotal = docType === "card_statement" && parts.length ? round2(parts.reduce((s, l) => s + l.amount, 0)) : null;
   const billTotal =
-    extracted.statedTotal !== null && Number.isFinite(extracted.statedTotal) && !isZero(extracted.statedTotal)
-      ? round2(extracted.statedTotal)
-      : null;
+    partsTotal !== null && !isZero(partsTotal)
+      ? partsTotal
+      : extracted.statedTotal !== null && Number.isFinite(extracted.statedTotal) && !isZero(extracted.statedTotal)
+        ? round2(extracted.statedTotal)
+        : null;
   const expectedTotal = promisedPrice !== null ? round2(promisedPrice * (hasTax ? 1 + GST_RATE : 1)) : null;
   const difference = expectedTotal !== null ? round2((billTotal ?? computedTotal) - expectedTotal) : null;
 
@@ -202,7 +213,9 @@ export function checkBill(extracted: Extracted, promise: string, focus = ""): Bi
       .reduce((s, l) => s + (l.amount === planAmount && planDifference !== null ? planDifference : l.amount), 0),
   );
 
+  const totalDifference = totalMismatch && billTotal !== null ? round2(billTotal - computedTotal) : null;
   return {
+    totalDifference,
     currency, docType, hasTax, focus: focus.trim(),
     lines, promisedPrice, planAmount, planDifference, sumOfCharges, gst, computedTotal,
     billTax, billTotal, expectedTotal, difference, unexplainedTotal, totalMismatch, warning,
@@ -211,19 +224,30 @@ export function checkBill(extracted: Extracted, promise: string, focus = ""): Bi
 
 /** Lines the complaint should mention: non-zero Unexplained/Wrong. */
 export function complaintLines(c: BillCheck): CheckedLine[] {
-  return c.lines.filter((l) => l.flag !== "OK" && !isZero(l.amount));
+  // The "Total on bill" row is not a charge: a total mismatch gets its own sentence instead.
+  return c.lines.filter((l) => l.kind !== "total" && l.flag !== "OK" && !isZero(l.amount));
+}
+
+/** One sentence about a total that doesn't match the lines, or "" when it matches. */
+function mismatchSentence(c: BillCheck): string {
+  if (!c.totalMismatch || c.billTotal === null || c.totalDifference === null) return "";
+  const money = (n: number) => formatMoney(n, c.currency);
+  const what = c.docType === "card_statement" ? "purchases listed on my statement" : "charges listed on my bill";
+  return `The ${what} add up to ${money(c.computedTotal)}, but the total shown is ${money(c.billTotal)}, a difference of ${money(Math.abs(c.totalDifference))}. Please explain this difference.`;
 }
 
 /** Nothing to dispute: no flagged lines and the totals add up. "Every line checks out" is an answer. */
 export function allClear(c: BillCheck): boolean {
-  return complaintLines(c).length === 0 && !c.warning && !(c.docType === "card_statement" && !c.focus);
+  return complaintLines(c).length === 0 && !c.totalMismatch && !c.warning;
 }
 
 /** Plain summary saved instead of a complaint when every line checks out. */
 export function allClearMessage(c: BillCheck): string {
   const money = (n: number) => formatMoney(n, c.currency);
   if (c.docType === "card_statement")
-    return `No charge on this statement matched "${c.focus}". Every listed purchase adds up to ${money(c.sumOfCharges)}, matching the statement's total. Nothing to query.`;
+    return c.focus
+      ? `No charge on this statement matched "${c.focus}". Every listed purchase adds up to ${money(c.sumOfCharges)}, matching the statement's total. Nothing to query.`
+      : `Every line checks out. The ${c.lines.filter((l) => l.kind === "charge").length} purchases add up to ${money(c.sumOfCharges)}, matching the statement's total. Nothing to query.`;
   const total = c.billTotal ?? c.computedTotal;
   return `Every line checks out. Charges ${money(c.sumOfCharges)}${c.hasTax ? ` + 18% GST ${money(c.gst)}` : ""} = ${money(c.computedTotal)}, matching the bill's total of ${money(total)}.${c.planDifference === 0 ? " The plan matches what you were promised." : ""} Nothing to dispute.`;
 }
@@ -234,6 +258,7 @@ export function allowedNumbers(c: BillCheck): Set<string> {
     c.promisedPrice, c.planAmount, c.planDifference, c.planDifference !== null ? Math.abs(c.planDifference) : null,
     c.sumOfCharges, c.gst, c.computedTotal, c.billTax, c.billTotal, c.expectedTotal, c.difference,
     c.difference !== null ? Math.abs(c.difference) : null, c.unexplainedTotal, 18, ...c.lines.map((l) => l.amount),
+    c.totalDifference !== null ? Math.abs(c.totalDifference) : null,
   ].filter((n): n is number => n !== null);
   const set = new Set<string>();
   // Numbers printed inside a line's label (dates, store numbers) are the bill's own text, not maths.
@@ -265,20 +290,19 @@ export function templateMessage(c: BillCheck, promise: string): string {
   const list = flagged.map((l) => `- ${l.label}: ${money(l.amount)} (${l.flag}: ${l.reason})`).join("\n");
   if (c.docType === "card_statement") {
     const txns = flagged.map((l) => `- ${l.label}: ${money(l.amount)}`).join("\n");
+    const mm = mismatchSentence(c);
     return `Dear Customer Care,
 
-${flagged.length ? `I would like to query the following transaction${flagged.length > 1 ? "s" : ""} on my statement:\n${txns}\n\n` : ""}Please provide:
-- The full merchant name and contact details, and the date and time of the transaction.
-- A copy of the receipt or transaction record.
-- Confirmation of whether this was authorised on my card.
-
+${flagged.length ? `I would like to query the following transaction${flagged.length > 1 ? "s" : ""} on my statement:\n${txns}\n\n` : ""}${mm ? `${mm}\n\n` : ""}Please provide:
+${flagged.length ? "- The full merchant name and contact details, and the date and time of the transaction.\n" : ""}${mm ? "- A breakdown of how the statement total was calculated.\n" : ""}- The full transaction record for anything I have queried.
+${flagged.length ? "- Confirmation of whether this was authorised on my card.\n" : ""}
 Thank you,
 ${SIGN_OFF}`;
   }
   const taxLine = c.hasTax ? ` GST at 18%: ${money(c.gst)}.` : "";
   return `Dear Customer Care,
 
-${promise.trim() ? `I was promised: "${promise}". My bill does not match this.\n\n` : ""}${flagged.length ? `Please explain the following charges:\n${list}\n\n` : ""}Sum of charges: ${money(c.sumOfCharges)}.${taxLine} ${c.billTotal !== null ? `Billed total: ${money(c.billTotal)}.` : `Calculated total: ${money(c.computedTotal)}.`}${c.difference !== null ? ` This is ${money(Math.abs(c.difference))} ${c.difference >= 0 ? "more" : "less"} than the expected ${money(c.expectedTotal!)}.` : ""}
+${promise.trim() ? `I was promised: "${promise}". My bill does not match this.\n\n` : ""}${flagged.length ? `Please explain the following charges:\n${list}\n\n` : ""}Sum of charges: ${money(c.sumOfCharges)}.${taxLine} ${c.billTotal !== null ? `Billed total: ${money(c.billTotal)}.` : `Calculated total: ${money(c.computedTotal)}.`}${c.difference !== null ? ` This is ${money(Math.abs(c.difference))} ${c.difference >= 0 ? "more" : "less"} than the expected ${money(c.expectedTotal!)}.` : ""}${mismatchSentence(c) ? `\n\n${mismatchSentence(c)}` : ""}
 
 Please provide:
 - What each of these charges is for.
