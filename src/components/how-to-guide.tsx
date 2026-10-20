@@ -1,12 +1,13 @@
 /** Short, simple how-to. Each step comes from something a tester got stuck on. */
 const STEPS = [
-  "Sign up with your email. If we send you an email, check Spam too.",
-  "Take a photo or screenshot of your bill. Black out your name, phone number, account number and address.",
-  "Type the company name (like Vi or Airtel), not the shop.",
-  "Type what you were promised, like \"₹749 plan, roaming off\". For a card bill, leave it empty.",
-  "Optional: type the one charge you want to check, like \"Clayton, 1 July\".",
-  "Click \"Check my bill\" once. Wait about 30 seconds. Your results show below.",
+  "Sign up with your email. Check your inbox & spam folders for a verification email.",
+  "Take a photo / screenshot of your bill. Black out name, phone number, account number & address.",
+  "Enter the service provider's name from the bill.",
+  "Enter what you were promised.",
+  "Optional: enter any specific line item's charges you want to check.",
+  "Click \u201cCheck my bill\u201d once. Wait about 30 seconds. Your results show below.",
   "If something looks wrong, copy the message, add your name, and send it to the company.",
+  "Edit the message in the box as needed.",
 ];
 
 export function HowToGuide({ collapsible = false }: { collapsible?: boolean }) {
@@ -23,7 +24,7 @@ export function HowToGuide({ collapsible = false }: { collapsible?: boolean }) {
   if (collapsible)
     return (
       <details className="mb-6 rounded-xl border bg-card p-4 shadow-soft">
-        <summary className="cursor-pointer text-sm font-medium">How to use (7 steps)</summary>
+        <summary className="cursor-pointer text-sm font-medium">How to use (8 steps)</summary>
         {list}
       </details>
     );
