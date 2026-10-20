@@ -3,6 +3,7 @@ import { useServerFn } from "@tanstack/react-start";
 import { useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { SavedMessage } from "@/components/saved-message";
+import { HowToGuide } from "@/components/how-to-guide";
 import { supabase } from "@/integrations/supabase/client";
 import { saveBill } from "@/lib/saved-bills.functions";
 import { privateText } from "@/lib/saving-rules";
@@ -118,6 +119,7 @@ function Index() {
         <p className="mt-2 text-muted-foreground">Upload a bill or card statement, tell us what you were promised or which charge looks wrong, and see what doesn't add up.</p>
       </header>
 
+      <HowToGuide collapsible />
       <section className="space-y-5 rounded-xl border bg-card p-6 shadow-soft">
         <label className="block text-sm">Company that sent the bill<span className="mt-1 block text-xs text-muted-foreground">The phone, utility or card company, not the shop.</span><input required value={provider} onChange={e => setProvider(e.target.value)} placeholder="e.g. Vi, Airtel, American Express" className="mt-2 w-full rounded-md border bg-background px-4 py-3" /></label>
         <label className="block text-sm">Bill period (optional)<input value={billPeriod} onChange={e => setBillPeriod(e.target.value)} placeholder="October 2026" className="mt-2 w-full rounded-md border bg-background px-4 py-3" /></label>
