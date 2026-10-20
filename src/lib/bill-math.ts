@@ -214,6 +214,20 @@ export function complaintLines(c: BillCheck): CheckedLine[] {
   return c.lines.filter((l) => l.flag !== "OK" && !isZero(l.amount));
 }
 
+/** Nothing to dispute: no flagged lines and the totals add up. "Every line checks out" is an answer. */
+export function allClear(c: BillCheck): boolean {
+  return complaintLines(c).length === 0 && !c.warning && !(c.docType === "card_statement" && !c.focus);
+}
+
+/** Plain summary saved instead of a complaint when every line checks out. */
+export function allClearMessage(c: BillCheck): string {
+  const money = (n: number) => formatMoney(n, c.currency);
+  if (c.docType === "card_statement")
+    return `No charge on this statement matched "${c.focus}". Every listed purchase adds up to ${money(c.sumOfCharges)}, matching the statement's total. Nothing to query.`;
+  const total = c.billTotal ?? c.computedTotal;
+  return `Every line checks out. Charges ${money(c.sumOfCharges)}${c.hasTax ? ` + 18% GST ${money(c.gst)}` : ""} = ${money(c.computedTotal)}, matching the bill's total of ${money(total)}.${c.planDifference === 0 ? " The plan matches what you were promised." : ""} Nothing to dispute.`;
+}
+
 /** Every number the complaint message is allowed to contain. */
 export function allowedNumbers(c: BillCheck): Set<string> {
   const nums = [

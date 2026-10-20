@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { checkBill, complaintLines, foreignNumbers, parsePromisedPrice, templateMessage } from "./bill-math";
+import { allClear, allClearMessage, checkBill, complaintLines, foreignNumbers, parsePromisedPrice, templateMessage } from "./bill-math";
 
 describe("Neeraj's Vi bill (golden pair 1) is unchanged", () => {
   const c = checkBill(
@@ -82,4 +82,23 @@ describe("promised price parsing ignores dates", () => {
   it("1st July is not a price", () => expect(parsePromisedPrice("Clayton on 1st July")).toBeNull());
   it("749 plan still parses", () => expect(parsePromisedPrice("749 plan, unlimited data")).toBe(749));
   it("$ works", () => expect(parsePromisedPrice("$45 plan")).toBe(45));
+});
+
+describe("every line checks out (Shobhit's test)", () => {
+  it("a correct bill gets no complaint", () => {
+    const c = checkBill(
+      { docType: "bill", currency: "₹", charges: [{ label: "Pro plan", amount: 1000, isPlan: true }], taxes: [{ label: "IGST @ 18%", amount: 180 }], statedTotal: 1180 },
+      "₹1000 plan",
+    );
+    expect(allClear(c)).toBe(true);
+    expect(allClearMessage(c)).toContain("Every line checks out");
+    expect(allClearMessage(c)).toContain("₹1180.00");
+  });
+  it("Neeraj's bill is NOT all clear", () => {
+    const c = checkBill(
+      { docType: "bill", currency: "₹", charges: [{ label: "Monthly Charges", amount: 751, isPlan: true }], taxes: [{ label: "GST", amount: 135.18 }], statedTotal: 886.18 },
+      "₹749 plan",
+    );
+    expect(allClear(c)).toBe(false);
+  });
 });

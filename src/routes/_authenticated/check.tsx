@@ -7,7 +7,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { saveBill } from "@/lib/saved-bills.functions";
 import { privateText } from "@/lib/saving-rules";
 import { useQueryClient } from "@tanstack/react-query";
-import { checkBill, type BillCheck } from "@/lib/bill-math";
+import { allClear, allClearMessage, checkBill, type BillCheck } from "@/lib/bill-math";
 import { draftComplaint, extractBill } from "@/lib/bill.functions";
 
 export const Route = createFileRoute("/_authenticated/check")({
@@ -80,7 +80,7 @@ function Index() {
       setCheck(c);
       setLastRunKey(runKey);
       setStatus("Drafting your message…");
-      const d = await draft({ data: { promise, focus, check: c } });
+      const d = allClear(c) ? { message: allClearMessage(c), usedFallback: false } : await draft({ data: { promise, focus, check: c } });
       setMessage(privateText(d.message));
       setStatus("Saving your bill…");
       const { data: userData } = await supabase.auth.getUser();
@@ -234,8 +234,15 @@ function Index() {
             {check.promisedPrice == null && check.docType !== "card_statement" && <p className="mt-3 text-xs text-muted-foreground">Add a price (e.g. ₹749) to your promise to see the difference.</p>}
           </section>
 
-          {message && saved && <SavedMessage key={saved.messageId} id={saved.messageId} draft={message} sent={false} />}
-          {message && !saved && !status && (
+          {message && allClear(check) && (
+            <section className="mt-6 rounded-xl border border-ok-strong/30 bg-ok p-6 text-ok-foreground shadow-soft">
+              <h2 className="mb-2 font-display text-lg font-semibold">✓ Every line checks out</h2>
+              <p className="text-sm">{message}</p>
+              <p className="mt-2 text-xs opacity-80">No complaint needed, so none was drafted.</p>
+            </section>
+          )}
+          {message && saved && !allClear(check) && <SavedMessage key={saved.messageId} id={saved.messageId} draft={message} sent={false} />}
+          {message && !saved && !status && !allClear(check) && (
             <section className="mt-6 rounded-xl border bg-card p-6 shadow-soft">
               <h2 className="mb-2 font-display text-lg font-semibold">Draft message (not saved)</h2>
               <textarea readOnly value={message} rows={14} className="w-full rounded-md border bg-background p-3 text-sm" />
